@@ -4,17 +4,19 @@ const { initialize, activeSessions } = require('./routes/socketRouter');
 
 const server = http.createServer(app);
 
+// ✅ Allow both 3000 and 5173 (React Vite default port)
 const corsOptions = {
-  origin: 'http://localhost:3000',
+  origin: ['http://localhost:3000', 'http://localhost:5173'],
   methods: ['GET', 'POST'],
   credentials: true,
 };
 
+// Initialize socket server with CORS
 initialize(server, corsOptions);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`✅ Server listening on port ${PORT}`);
 });
 
 process.on('SIGTERM', () => {

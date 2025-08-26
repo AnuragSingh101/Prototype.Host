@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Terminal from './Terminal';
-import FileManager from './FileManager';
+// import FileManager from './FileManager';
+import FileManager from './fileManager/FileManagerPanel'; // updated import
 import ProcessManager from './ProcessManager'; // updated import
 import { useSshSession } from '../hooks/useSshSession';
 

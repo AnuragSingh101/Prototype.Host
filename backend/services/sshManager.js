@@ -346,7 +346,22 @@ class SSHManager extends EventEmitter {
       stream.on('error', err2 => callback(err2));
     });
   }
+
+  async writeFile(remotePath, contentBuffer) {
+    const sftp = await this.getSFTP();
+    const target = this.normalizePath(remotePath);
+
+    return new Promise((resolve, reject) => {
+      const writeStream = sftp.createWriteStream(target);
+      writeStream.on('close', () => resolve());
+      writeStream.on('error', reject);
+      writeStream.end(contentBuffer);
+    });
+  }
+
 }
+
+
 
 module.exports = SSHManager;
 // ---------- Additional methods for controllers/sshController.js ----------

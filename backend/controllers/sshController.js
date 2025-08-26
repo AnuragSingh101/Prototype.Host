@@ -40,7 +40,7 @@ function handleConnection(socket) {
     if (ssh && ssh.isConnected()) ssh.resize(cols, rows);
   });
 
-  // Legacy: generic exec (kept for backwards-compat)
+  // Legacy: generic exec
   socket.on('execute-command', (command) => {
     const ssh = activeSessions.get(socket.id);
     if (!ssh || !ssh.isConnected()) {
@@ -64,21 +64,19 @@ function handleConnection(socket) {
 
   // NEW: list directory → JSON
   socket.on('list-directory', async ({ path }) => {
-  const ssh = activeSessions.get(socket.id);
-  if (!ssh || !ssh.isConnected()) {
-    return socket.emit('directory-data', err('Not connected'));
-  }
-  try {
-    const items = await ssh.listDirectory(path);
-    socket.emit('directory-data', ok({ path, items }));
-  } catch (e) {
-    socket.emit('directory-data', err(e.message));
-  }
-});
+    const ssh = activeSessions.get(socket.id);
+    if (!ssh || !ssh.isConnected()) {
+      return socket.emit('directory-data', err('Not connected'));
+    }
+    try {
+      const items = await ssh.listDirectory(path);
+      socket.emit('directory-data', ok({ path, items }));
+    } catch (e) {
+      socket.emit('directory-data', err(e.message));
+    }
+  });
 
-
-  // NEW: file actions (rename, delete, mkdir, move, copy, compress, extract)
-  // Expect: { action, payload }
+  // NEW: file actions (rename, delete, mkdir, move, copy, compress, extract, chmod, stat)
   socket.on('file-action', async ({ action, payload }) => {
     const ssh = activeSessions.get(socket.id);
     if (!ssh || !ssh.isConnected()) {
@@ -93,7 +91,7 @@ function handleConnection(socket) {
           return socket.emit('file-action-result', ok({ action }));
         }
         case 'delete': {
-          const { targets } = payload; // array of absolute paths
+          const { targets } = payload;
           await ssh.deleteMany(targets);
           return socket.emit('file-action-result', ok({ action }));
         }
@@ -113,12 +111,12 @@ function handleConnection(socket) {
           return socket.emit('file-action-result', ok({ action }));
         }
         case 'compress': {
-          const { cwd, archiveName, items } = payload; // items: names (not absolute)
+          const { cwd, archiveName, items } = payload;
           await ssh.compress(cwd, archiveName, items);
           return socket.emit('file-action-result', ok({ action }));
         }
         case 'extract': {
-          const { cwd, archives } = payload; // archives: absolute paths
+          const { cwd, archives } = payload;
           await ssh.extract(cwd, archives);
           return socket.emit('file-action-result', ok({ action }));
         }
@@ -127,11 +125,31 @@ function handleConnection(socket) {
           await ssh.chmod(path, mode);
           return socket.emit('file-action-result', ok({ action }));
         }
+        case 'stat': {   // ✅ NEW feature
+          const { path } = payload;
+          const info = await ssh.stat(path);
+          return socket.emit('file-action-result', ok({ action, info }));
+        }
         default:
           return socket.emit('file-action-result', err(`Unknown action: ${action}`));
       }
     } catch (e) {
       return socket.emit('file-action-result', err(e.message));
+    }
+  });
+
+  // NEW: upload or write a file
+  socket.on('sftp-upload', async ({ path, contentBase64 }) => {
+    const ssh = activeSessions.get(socket.id);
+    if (!ssh || !ssh.isConnected()) {
+      return socket.emit('sftp-error', 'Not connected');
+    }
+    try {
+      const buffer = Buffer.from(contentBase64, 'base64');
+      await ssh.writeFile(path, buffer);
+      socket.emit('sftp-upload-result', ok({ path }));
+    } catch (e) {
+      socket.emit('sftp-error', e.message);
     }
   });
 
