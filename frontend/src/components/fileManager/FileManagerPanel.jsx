@@ -34,26 +34,43 @@ export default function FileManagerPanel({ toggleSidebar }) {
 
   // Socket listeners
   useEffect(() => {
-    if (!socket) return;
+  if (!socket) return;
 
-    socket.on("directory-data", (data) => {
-      setLoading(false);
-      if (data.ok) setFiles(data.items);
-      else console.error("Directory load error:", data.error?.message || data.error);
-    });
+  // Handle directory listing
+  socket.on("directory-data", (data) => {
+    setLoading(false);
+    if (data.ok) {
+      setFiles(data.items);
+    } else {
+      console.error("Directory load error:", data.error?.message || data.error);
+    }
+  });
 
-    socket.on("file-action-result", (data) => {
-      if (data.ok) loadDirectory(currentPath);
-      else alert("Error: " + (data.error?.message || data.error));
-    });
+  // Handle file actions (create, delete, rename, etc.)
+  socket.on("file-action-result", (data) => {
+    if (data.ok) {
+      // ✅ Prefer backend cwd if provided, fallback to currentPath
+      const reloadPath = data.cwd || currentPath;
+      setCurrentPath(reloadPath);
+      loadDirectory(reloadPath);
+    } else {
+      alert("Error: " + (data.error?.message || data.error));
+    }
+  });
 
-    loadDirectory("/");
+  // ✅ Always load currentPath when it changes (auto-refresh on navigation)
+  if (currentPath) {
+    setLoading(true);
+    loadDirectory(currentPath);
+  }
 
-    return () => {
-      socket.off("directory-data");
-      socket.off("file-action-result");
-    };
-  }, [socket]);
+  return () => {
+    socket.off("directory-data");
+    socket.off("file-action-result");
+  };
+}, [socket, currentPath]);
+
+
 
   // Load directory
   const loadDirectory = (path) => {
@@ -94,16 +111,18 @@ export default function FileManagerPanel({ toggleSidebar }) {
   };
 
   // Actions
-  const doAction = (action, payload) => {
-    socket.emit("file-action", { action, ...payload });
-  };
+const doAction = (action, payload) => {
+  socket.emit("file-action", { action, payload });   // ✅ wrap payload
+};
+
 
   const handleRename = (oldName, newName) => {
-    doAction("rename", {
-      oldPath: currentPath === "/" ? `/${oldName}` : `${currentPath}/${oldName}`,
-      newPath: currentPath === "/" ? `/${newName}` : `${currentPath}/${newName}`,
-    });
-  };
+  doAction("rename", {
+    from: currentPath === "/" ? `/${oldName}` : `${currentPath}/${oldName}`,
+    to: currentPath === "/" ? `/${newName}` : `${currentPath}/${newName}`,
+  });
+};
+
 
   const handleAction = (action, file) => {
     switch (action) {
@@ -132,6 +151,15 @@ export default function FileManagerPanel({ toggleSidebar }) {
         break;
       default:
         break;
+    }
+  };
+
+  const handleCreate = (type, name) => {
+    const fullPath = currentPath === "/" ? `/${name}` : `${currentPath}/${name}`;
+    if (type === "file") {
+      doAction("create-file", { path: fullPath });
+    } else if (type === "folder") {
+      doAction("create-folder", { path: fullPath });
     }
   };
 
@@ -191,6 +219,7 @@ export default function FileManagerPanel({ toggleSidebar }) {
           viewMode={viewMode}
           setViewMode={setViewMode}
           onUpload={() => setShowTransfer(true)}
+          handleCreate={handleCreate}   // ✅ fixed
         />
 
         <FileTable
@@ -222,17 +251,18 @@ export default function FileManagerPanel({ toggleSidebar }) {
 
       {showEditor && (
         <FileEditor
-          socket={socket}
           file={showEditor}
           currentPath={currentPath}
+          socket={socket}
           onClose={() => setShowEditor(null)}
         />
       )}
 
       {showProps && (
         <FilePropertiesModal
-          socket={socket}
           file={showProps}
+          currentPath={currentPath}
+          formatBytes={formatBytes}
           onClose={() => setShowProps(null)}
         />
       )}
@@ -240,8 +270,10 @@ export default function FileManagerPanel({ toggleSidebar }) {
       {showCompression && (
         <CompressionModal
           socket={socket}
-          file={showCompression}
-          currentPath={currentPath}
+          cwd={currentPath}
+          selected={selected}
+          isOpen={true}
+          reloadDirectory={loadDirectory}
           onClose={() => setShowCompression(null)}
         />
       )}

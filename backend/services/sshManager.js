@@ -10,7 +10,7 @@ class SSHManager extends EventEmitter {
     this.stream = null;
     this.connected = false;
     this.keepAliveInterval = null;
-    this.sftp = null; // cache SFTP session
+    this.sftp = null;
 
     this.setupClientEvents();
   }
@@ -20,7 +20,6 @@ class SSHManager extends EventEmitter {
       console.log('SSH Client :: ready');
       this.connected = true;
 
-      // Interactive shell (legacy terminal)
       this.client.shell((err, stream) => {
         if (err) {
           this.emit('error', err);
@@ -107,7 +106,6 @@ class SSHManager extends EventEmitter {
     this.client.connect(config);
   }
 
-  // ---------- Legacy/terminal ----------
   write(data) {
     if (this.stream && this.connected) {
       this.stream.write(data);
@@ -116,7 +114,7 @@ class SSHManager extends EventEmitter {
 
   resize(cols, rows) {
     if (this.stream && this.connected) {
-      this.stream.setWindow(rows, cols, 0, 0); // fixed signature
+      this.stream.setWindow(rows, cols, 0, 0);
     }
   }
 
@@ -147,19 +145,29 @@ class SSHManager extends EventEmitter {
     }
   }
 
-  // ---------- Exec ----------
   exec(command, callback) {
     if (!this.connected) {
-      return callback(new Error('SSH not connected'));
+      if (typeof callback === 'function') {
+        return callback(new Error('SSH not connected'));
+      }
+      return;
     }
+
     this.client.exec(command, (err, stream) => {
-      if (err) return callback(err);
+      if (err) {
+        if (typeof callback === 'function') {
+          return callback(err);
+        }
+        return;
+      }
 
       let output = '';
       let errorOutput = '';
 
       stream.on('close', (code, signal) => {
-        callback(null, { output, errorOutput, code, signal });
+        if (typeof callback === 'function') {
+          callback(null, { output, errorOutput, code, signal });
+        }
       });
 
       stream.on('data', (data) => {
@@ -184,7 +192,6 @@ class SSHManager extends EventEmitter {
     });
   }
 
-  // ---------- SFTP helpers ----------
   async getSFTP() {
     if (this.sftp) return this.sftp;
     this.sftp = await new Promise((resolve, reject) => {
@@ -319,22 +326,34 @@ class SSHManager extends EventEmitter {
   }
 
   async compress(cwd, archiveName, items) {
-    const safeCwd = this.normalizePath(cwd);
-    const safeArchive = path.posix.join(safeCwd, archiveName);
-    const safeItems = items.map(n => `"${n.replace(/"/g, '\\"')}"`).join(' ');
-    const cmd = `tar -czf "${safeArchive}" -C "${safeCwd}" ${safeItems}`;
-    return this.execPromise(cmd);
-  }
+  const safeCwd = this.normalizePath(cwd);
+  const safeArchive = path.posix.join(safeCwd, archiveName);
 
-  async extract(cwd, archives) {
-    const safeCwd = this.normalizePath(cwd);
-    const cmds = archives.map(a => {
-      const safe = this.normalizePath(a);
-      return `tar -xzf "${safe}" -C "${safeCwd}"`;
-    });
-    const cmd = cmds.join(' && ');
-    return this.execPromise(cmd);
-  }
+  // Use only the base name of each item to ensure paths are correct relative to cwd
+  const safeItems = items
+    .map(n => `"${path.posix.basename(n).replace(/(["\s'$`\\])/g, '\\$1')}"`)
+    .join(' ');
+
+  const cmd = `tar -czf "${safeArchive}" -C "${safeCwd}" ${safeItems}`;
+  return this.execPromise(cmd);
+}
+
+
+
+ async extract(cwd, archives) {
+  const safeCwd = this.normalizePath(cwd);
+
+  const cmds = archives.map(a => {
+    const safe = this.normalizePath(a);
+    const baseName = path.posix.basename(safe).replace(/\.(tar\.gz|tgz|zip|tar)$/, '');
+    const targetDir = path.posix.join(safeCwd, baseName);
+
+    return `mkdir -p "${targetDir}" && tar -xzf "${safe}" -C "${targetDir}"`;
+  });
+
+  const cmd = cmds.join(' && ');
+  return this.execPromise(cmd);
+}
 
   fetchFile(remotePath, callback) {
     this.client.sftp((err, sftp) => {
@@ -361,7 +380,4 @@ class SSHManager extends EventEmitter {
 
 }
 
-
-
 module.exports = SSHManager;
-// ---------- Additional methods for controllers/sshController.js ----------

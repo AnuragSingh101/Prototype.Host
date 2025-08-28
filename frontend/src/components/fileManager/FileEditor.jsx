@@ -1,35 +1,48 @@
 import React, { useEffect, useState } from "react";
-import { io } from "socket.io-client";
 
-const socket = io("http://localhost:3001");
-
-export default function FileEditor({ filePath, isOpen, onClose }) {
+export default function FileEditor({ file, currentPath, socket, onClose }) {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
 
+  if (!file) return null;
+
+  const filePath = currentPath === "/" ? `/${file.name}` : `${currentPath}/${file.name}`;
+
   useEffect(() => {
-    if (isOpen && filePath) {
-      socket.emit("sftp-fetch", filePath);
-      socket.once("sftp-file", ({ content }) => {
-        setContent(atob(content));
-      });
-    }
-  }, [isOpen, filePath]);
+    if (!socket || !file) return;
+    socket.emit("sftp-fetch", filePath);
+
+    const handler = ({ content }) => {
+      setContent(atob(content));
+    };
+
+    socket.once("sftp-file", handler);
+
+    return () => socket.off("sftp-file", handler);
+  }, [file, filePath, socket]);
 
   const saveFile = () => {
+    if (!socket || !file) return;
     setSaving(true);
     const base64 = btoa(content);
-    socket.emit("sftp-upload", { path: filePath, content: base64 });
-    socket.once("file-action-result", () => {
-      setSaving(false);
-      onClose();
-    });
+
+    socket.emit("sftp-upload", { path: filePath, contentBase64: base64 });
+
+    const handler = (res) => {
+      if (res.ok) {
+        setSaving(false);
+        onClose();
+      } else {
+        alert("Failed to save: " + (res.error?.message || "Unknown error"));
+        setSaving(false);
+      }
+    };
+
+    socket.once("sftp-upload-result", handler);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white p-4 rounded-xl shadow-lg w-[600px] h-[400px] flex flex-col">
         <h2 className="text-lg font-bold mb-3">Editing: {filePath}</h2>
 
